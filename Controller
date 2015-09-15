@@ -1,0 +1,12 @@
+#include<stdio.h>
+#include "serial.h"
+#include "addnode.h"
+#include "remnode.h"
+
+int main()
+{
+	serial_init();
+	add_node_to_network();
+	
+	//remove_node_from_network();
+}
