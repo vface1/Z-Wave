@@ -23,10 +23,8 @@ struct Add
 struct Add* add_node_to_network()
 {
 		char *buff;
-		char j;
-		static int swap[22];
 		char value[]={0x01,0x05,0x00,0x4A,0X01,0X01,0XB0};//serial API for Add function
-	        p = malloc(sizeof(struct Add));
+	    p = malloc(sizeof(struct Add));
 	 
 
 	    struct termios options;
