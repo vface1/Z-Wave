@@ -1,0 +1,584 @@
+**********************************************************************
+All modules separately written 
+
+bug: in neighbour update
+**********************************************************************
+
+#include<stdio.h>
+#include "mongoose.h"
+#include "addnode.h"
+#include "removenode.h"
+#include "removefailed.h"
+#include "neighbourUp.h"
+#include "isFailed.h"
+
+int fd = 0,ret_bytes = 0,n = 0,flag=0,i = 0,status = 0;
+char *res_buff = '\0';
+
+static const char *s_http_port = "8000";
+static struct mg_serve_http_opts s_http_server_opts;
+
+
+/*static void handle_nodeAdd_call(struct mg_connection *nc, struct http_message *hm) 
+{
+	struct Add *m;
+	m = add_node_to_network();
+	
+        printf("\nResult\n");
+	printf("%d\n",m->code);
+        printf("%x\n",*((char*)&m->buff+5));
+ 
+        //printf("%x\n",(*m).buff+5);
+        printf("%s\n",m->desc);
+        
+	mg_printf(nc, "%s", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n");
+        
+            mg_printf_http_chunk(nc, "{ \"code\":%d \n \"Message\":%s \n}", m->code,m->desc );
+	if(*((char *) &m->buff+5) == 05)
+		mg_printf_http_chunk(nc, "{\n \"Message\": Node Added successfully \n \"Node ID\": %d  \n }", *((char *) &m->buff+6) );
+		
+	else
+		mg_printf_http_chunk(nc, "%s\n", "{ \n \"Message\": Unable to Add }");
+	
+ 	mg_send_http_chunk(nc, "", 0);  
+        free(m);
+  }*/
+
+static void handle_nodeAdd_call(struct mg_connection *nc, struct http_message *hm)  //pointer
+{
+	status = add_node_to_network();
+
+	mg_printf(nc, "%s", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n");
+        mg_printf_http_chunk(nc, "{ \"code\":%d \n \"Message\":%s \n}", p->code,p->desc );
+        if(*((char *) &p->buff+5) == 5)
+            mg_printf_http_chunk(nc, "{\n \"Message\": Node Added successfully \n \"Node ID\": %d  \n }",*((char *) &p->buff+6));
+        	
+	else
+		mg_printf_http_chunk(nc, "%s\n", "{ \n \"Message\": Unable to Add }");
+
+        mg_send_http_chunk(nc, "", 0);
+        free(p);
+	 
+}
+static void handle_nodeRemove_call(struct mg_connection *nc, struct http_message *hm) 
+{
+	status = remove_node_from_network();
+	
+	mg_printf(nc, "%s", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n");
+        mg_printf_http_chunk(nc, "{ \"code\":%d \n \"Message\":%s \n}", p->code,p->desc );
+	if(*((char *) &p->buff+5) == 06)
+		mg_printf_http_chunk(nc, "{\n \"Message\": Node Removed successfully \n \"Node ID\": %d \n  }", *((char *) &p->buff+6));
+	
+        else
+		mg_printf_http_chunk(nc, "%s\n", "{\n \"Message\": Unable to Remove }");
+
+  	mg_send_http_chunk(nc, "", 0); 
+        free(p);
+	
+}
+
+static void handle_noderemovefailed_call(struct mg_connection *nc, struct http_message *hm) 
+{
+	status = remove_failed_node();
+        
+        printf("Result\n");
+        
+            printf("R->%x\t",*((char*)&p->buff+0));
+            printf("R->%x\t",*((char*)&p->buff+1));
+            printf("R->%x\t",*((char*)&p->buff+4));
+            printf("R->%x\t",*((char*)&p->buff+5));
+        
+	mg_printf(nc, "%s", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n");
+        mg_printf_http_chunk(nc, "{ \"code\":%d \n \"Message\":%s \n}", p->code,p->desc );
+	if(*((char *) &p->buff+5) == 01)
+                mg_printf_http_chunk(nc, "%s\n", "{ \n \"Message\": Failed Node Removed successfully \n \"Node ID:\": %d }", 0);
+	
+	else 
+                mg_printf_http_chunk(nc, "%s\n", "{ \n \"Message\": Unable to Remove failed Node \n \"Node ID:\": %d}", 0);
+
+  	mg_send_http_chunk(nc, "", 0);  
+        free(p);
+}
+
+
+
+static void ev_handler(struct mg_connection *nc, int ev, void *ev_data) 
+{
+  	struct http_message *hm = (struct http_message *) ev_data;
+
+	switch (ev) 
+	{
+    		case MG_EV_HTTP_REQUEST:
+      			if (mg_vcmp(&hm->uri, "/api/v1/nodeAdd") == 0) //Add Node
+			{
+			        handle_nodeAdd_call(nc, hm);                    // Handle RESTful call 
+			}
+			
+			else if(mg_vcmp(&hm->uri, "/api/v1/nodeRemove") == 0) //Remove Node
+			{
+				handle_nodeRemove_call(nc, hm);
+			}
+			
+			else if(mg_vcmp(&hm->uri, "/api/v1/nodeRemoveFailed") == 0) 
+			{
+				handle_noderemovefailed_call(nc, hm);
+			}
+
+			else if (mg_vcmp(&hm->uri, "/printcontent") == 0) 
+			{
+			        char buf[100] = {0};
+			        memcpy(buf, hm->body.p,sizeof(buf) - 1 < hm->body.len? sizeof(buf) - 1 : hm->body.len);
+			        printf("%s\n", buf);
+   			} 
+			else 
+			{
+			        mg_serve_http(nc, hm, s_http_server_opts);  /* Serve static content */
+      			}
+      			break;
+			default:
+      			break;
+  	}
+}
+
+int main(int argc, char *argv[]) {
+  struct mg_mgr mgr;
+  struct mg_connection *nc;
+  int i;
+  char *cp;
+#ifdef MG_ENABLE_SSL
+  const char *ssl_cert = NULL;
+#endif
+
+  mg_mgr_init(&mgr, NULL);
+
+  /* Process command line options to customize HTTP server */
+  for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "-D") == 0 && i + 1 < argc) {
+      mgr.hexdump_file = argv[++i];
+    } else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
+      s_http_server_opts.document_root = argv[++i];
+    } else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
+      s_http_port = argv[++i];
+    } else if (strcmp(argv[i], "-a") == 0 && i + 1 < argc) {
+      s_http_server_opts.auth_domain = argv[++i];
+    } else if (strcmp(argv[i], "-P") == 0 && i + 1 < argc) {
+      s_http_server_opts.global_auth_file = argv[++i];
+    } else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
+      s_http_server_opts.per_directory_auth_file = argv[++i];
+    } else if (strcmp(argv[i], "-r") == 0 && i + 1 < argc) {
+      s_http_server_opts.url_rewrites = argv[++i];
+#ifndef MG_DISABLE_CGI
+    } else if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {
+      s_http_server_opts.cgi_interpreter = argv[++i];
+#endif
+#ifdef MG_ENABLE_SSL
+    } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
+      ssl_cert = argv[++i];
+#endif
+    }
+  }
+
+  /* Set HTTP server options */
+  nc = mg_bind(&mgr, s_http_port, ev_handler);
+  if (nc == NULL) {
+    fprintf(stderr, "Error starting server on port %s\n", s_http_port);
+    exit(1);
+  }
+
+#ifdef MG_ENABLE_SSL
+  if (ssl_cert != NULL) {
+    const char *err_str = mg_set_ssl(nc, ssl_cert, NULL);
+    if (err_str != NULL) {
+      fprintf(stderr, "Error loading SSL cert: %s\n", err_str);
+      exit(1);
+    }
+  }
+#endif
+
+  mg_set_protocol_http_websocket(nc);
+  s_http_server_opts.document_root = "."; //path of html script
+  s_http_server_opts.enable_directory_listing = "yes"; //server config file 
+
+  /* Use current binary directory as document root */
+  if (argc > 0 && ((cp = strrchr(argv[0], '/')) != NULL ||
+      (cp = strrchr(argv[0], '/')) != NULL)) {
+    *cp = '\0';
+    s_http_server_opts.document_root = argv[0];
+  }
+
+  printf("Starting RESTful server on port %s\n", s_http_port);
+  for (;;) {
+    mg_mgr_poll(&mgr, 1000);
+  }
+  mg_mgr_free(&mgr);
+
+  return 0;
+}
+
+
+*************
+Addnode:
+*************
+#ifndef ADDNODE_H
+#define ADDNODE_H
+
+#include "extern_files.h" //External files
+
+#include <string.h>  /* String function definitions */
+#include <unistd.h>  /* UNIX standard function definitions */
+#include <fcntl.h>   /* File control definitions */
+#include <errno.h>   /* Error number definitions */
+#include <termios.h> /* POSIX terminal control definitions */
+#include <stdlib.h>  
+#include "serial_init.h"
+
+struct Add
+{
+	int code;
+	char *desc;
+	char *buff;
+	
+}*p;
+
+int add_node_to_network()
+{
+		
+		char value[]={0x01,0x05,0x00,0x4A,0X01,0X01,0XB0};//serial API for Add function
+	        
+                p = (struct Add*)malloc(2*sizeof(struct Add));
+             
+                p->code = 0;
+                p->desc = '\0';
+                p->buff = '\0';
+             
+                fd = serial_init();
+	    
+
+	    n = write(fd,value,sizeof(value));//write the value
+		
+	
+	while(1)
+	{
+    	    ret_bytes=read(fd,  &p->buff, 255);//read the buffer
+	    printf("\nReturn Bytes: %d", ret_bytes);
+           
+	    if(*((char *) &p->buff+0) == 06) //ACk frame
+	    {
+		p->code = *((char *) &p->buff+0);
+		p->desc= "ACK";
+	    }
+	    if(*((char *) &p->buff+0) == 15) //NACK frame
+	    {
+		p->code = *((char *) &p->buff+0);
+		p->desc= "NACK";
+	    }
+	    if(*((char *) &p->buff+0) == 18) //CAN frame 
+	    {
+		p->code = *((char *) &p->buff+0);
+		p->desc= "CAN";
+	    }
+
+	    for(i=0;i<ret_bytes;i++)
+	    	{
+                	printf("H-%x \t",*((char *) &p->buff+i));
+                }
+            if(ret_bytes <=0) break;
+       	    sleep(1);
+	    
+
+	} //end of while()
+	close(fd);
+	return 0;
+	
+} //end of main()
+
+#endif
+
+******************
+Remove node
+******************
+#ifndef REMOVENODE_H
+#define REMOVENODE_H
+
+#include "extern_files.h" //External files
+#include <string.h>  /* String function definitions */
+#include <unistd.h>  /* UNIX standard function definitions */
+#include <fcntl.h>   /* File control definitions */
+#include <errno.h>   /* Error number definitions */
+#include <termios.h> /* POSIX terminal control definitions */
+#include <stdlib.h>
+#include "serial_init.h"
+
+int remove_node_from_network()
+{
+	    char value[]={0x01,0x05,0x00,0x4B,0X01,0X01,0XB1};//serial API for Remove function
+            p = (struct Add*)malloc(2*sizeof(struct Add));
+             
+            p->code = 0;
+            p->desc = '\0';
+            p->buff = '\0';
+             
+            fd = serial_init();
+	    n = write(fd,value,sizeof(value));//write the value
+	
+	while(1)
+	{
+    	    ret_bytes=read(fd,  &p->buff, 255);//read the buffer
+	    
+            printf("\nReturn Bytes: %d\n", ret_bytes);
+            if(*((char *) &p->buff+0) == 06) //ACk frame
+	    {
+		p->code = *((char *) &p->buff+0);
+		p->desc= "ACK";
+	    }
+            if(*((char *) &p->buff+0) == 15) //NACK frame
+	    {
+		p->code = *((char *) &p->buff+0);
+		p->desc= "NACK";
+	    }
+	    if(*((char *) &p->buff+0) == 18) //CAN frame 
+	    {
+		p->code = *((char *) &p->buff+0);
+		p->desc= "CAN";
+	    }
+            
+            for(i=0;i<ret_bytes;i++)
+	    {
+                printf("H-%x \t",*((char *) &p->buff+i));
+	    }
+            if (ret_bytes <=0) break ;
+	    sleep (1); 
+       	} //end of while()
+	close(fd);
+
+	return 0;
+	
+} //end of main()
+
+#endif
+
+*********************
+neighbour update
+*********************
+#ifndef NEIGHBOURUP_H
+#define NEIGHBOURUP_H
+
+#include "extern_files.h" //External files
+
+#include <string.h>  /* String function definitions */
+#include <unistd.h>  /* UNIX standard function definitions */
+#include <fcntl.h>   /* File control definitions */
+#include <errno.h>   /* Error number definitions */
+#include <termios.h> /* POSIX terminal control definitions */
+#include <stdlib.h>  
+#include "serial_init.h"
+
+
+int node_neighbour_update()
+{
+	   
+	     //char value[]={0x01,0x05,0x00,0x48,0x21,0x01,0x92}; //serial API for Node Neighbour Update
+	    char value[]={0x01,0x05,0x00,0x48,0x57,0x01,0xE4};
+            p = (struct Add*)malloc(2*sizeof(struct Add));
+             
+            p->code = 0;
+            p->desc = '\0';
+            p->buff = '\0';
+             
+            fd = serial_init();
+	    
+	    n = write(fd,value,sizeof(value));//write the value
+	  
+	while(1)
+	{
+    	    ret_bytes=read(fd,  &p->buff, 255);//read the buffer
+            //printf("%d\n",flag);
+	    flag++;
+	    printf("\nReturn Bytes: %d\n", ret_bytes);
+            /*if(*((char *) &p->buff+0) == 06) //ACk frame
+	    {
+		p->code = *((char *) &p->buff+0);
+		p->desc= "ACK";
+	    }
+            if(*((char *) &p->buff+0) == 15) //NACK frame
+	    {
+		p->code = *((char *) &p->buff+0);
+		p->desc= "NACK";
+	    }
+	    if(*((char *) &p->buff+0) == 18) //CAN frame 
+	    {
+		p->code = *((char *) &p->buff+0);
+		p->desc= "CAN";
+	    }*/
+            
+            for(i=0;i<ret_bytes;i++)
+	    {
+                printf("H-%d \t",*((char *) &p->buff+i));
+	    }
+	
+	    
+		if(flag == 1)
+		{
+			if((ret_bytes == -1) || (ret_bytes == 0))
+			{
+				close(fd);
+				break;
+			}
+		}
+            if(flag == 15)
+		if(*((char *) &p->buff+5) == 34 || *((char *) &p->buff+5) == 35 )
+                    break;
+            sleep (1);	
+	
+	} //end of while()
+
+	close(fd);
+	return *((char *) &p->buff+5);
+}
+
+#endif
+
+***************************
+isFailed
+***************************
+#ifndef ISFAILED_H
+#define ISFAILED_H
+
+#include "extern_files.h"
+#include "addnode.h" //External files
+
+#include <string.h>  /* String function definitions */
+#include <unistd.h>  /* UNIX standard function definitions */
+#include <fcntl.h>   /* File control definitions */
+#include <errno.h>   /* Error number definitions */
+#include <termios.h> /* POSIX terminal control definitions */
+#include <stdlib.h>  
+#include "serial_init.h"
+
+int is_failed_node()
+{
+ 	    char value[]={0x01,0x04,0x00,0x62,0x57,0xCE}; //serial API for isFailedNode()
+	    
+	     //p = (struct Add*)malloc(2*sizeof(struct Add));
+             
+            p->code = 0;
+            p->desc = '\0';
+            p->buff = '\0';
+             
+            fd = serial_init();
+	    n = write(fd,value,sizeof(value));//write the value
+	    
+	while(1)
+	{
+    	    ret_bytes=read(fd,  &p->buff, 255);//read the buffer
+        
+	    printf("\nReturned value from read: %d\n", ret_bytes);
+//            if(*((char *) &p->buff+0) == 06) //ACk frame
+//	    {
+//		p->code = *((char *) &p->buff+0);
+//		p->desc= "ACK";
+//	    }
+//            if(*((char *) &p->buff+0) == 15) //NACK frame
+//	    {
+//		p->code = *((char *) &p->buff+0);
+//		p->desc= "NACK";
+//	    }
+//	    if(*((char *) &p->buff+0) == 18) //CAN frame 
+//	    {
+//		p->code = *((char *) &p->buff+0);
+//		p->desc= "CAN";
+//	    }
+            
+            for(i=0;i<ret_bytes;i++)
+	    {
+                printf("i=%d,%x \t",i,*((char *) &p->buff+i));
+	    }
+            if (ret_bytes <= 0) break;
+	    sleep (1); 
+       	   
+	} //end of while()
+	
+	
+	close(fd);
+	return *((char *) &p->buff+4);
+	
+}
+#endif
+
+
+**********************
+remove failed node
+**********************
+#ifndef REMOVEFAILED_H
+#define REMOVEFAILED_H
+
+#include "extern_files.h" //External files
+
+#include <string.h>  /* String function definitions */
+#include <unistd.h>  /* UNIX standard function definitions */
+#include <fcntl.h>   /* File control definitions */
+#include <errno.h>   /* Error number definitions */
+#include <termios.h> /* POSIX terminal control definitions */
+#include <stdlib.h>  
+#include "serial_init.h"
+#include "neighbourUp.h"
+#include "isFailed.h"
+
+int remove_failed_node()
+{
+	    int fail;
+	    int neigh = node_neighbour_update();
+           
+	    if((neigh == 34) || (neigh == 35))
+	    {
+		fail = is_failed_node();
+	    }
+	    if(fail == 01)
+	    {
+                    //char value[]={0x01,0x05,0x00,0x61,0x11,0x01,0x8B}; //serial API for RemoveFailedNode()
+                char value[]={0x01,0x05,0x00,0x61,0x57,0x01,0xCD};
+                //p = (struct Add*)malloc(2*sizeof(struct Add));
+
+                p->code = 0;
+                p->desc = '\0';
+                p->buff = '\0';
+                
+                fd = serial_init();
+                n = write(fd,value,sizeof(value));//write the value
+
+
+                    while(1)
+                    {
+                        ret_bytes=read(fd,  &p->buff, 255);//read the buffer
+                        
+                        printf("\nReturned value from read: %d\n", ret_bytes);
+                        if(*((char *) &p->buff+0) == 06) //ACk frame
+                        {
+                            p->code = *((char *) &p->buff+0);
+                            p->desc= "ACK";
+                        }
+                        if(*((char *) &p->buff+0) == 15) //NACK frame
+                        {
+                            p->code = *((char *) &p->buff+0);
+                            p->desc= "NACK";
+                        }
+                        if(*((char *) &p->buff+0) == 18) //CAN frame 
+                        {
+                            p->code = *((char *) &p->buff+0);
+                            p->desc= "CAN";
+                        }
+                        
+                        for(i=0;i<ret_bytes;i++)
+                        {
+                            printf("i=%d,%x\t",i,*((char *) &p->buff+i));
+                           
+                        }
+                        if (ret_bytes <=0) break;
+                        sleep (1); 
+                     } //end of while()
+
+		}
+	return 0;
+} //end of function()
+
+#endif
