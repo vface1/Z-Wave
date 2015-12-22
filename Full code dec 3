@@ -425,7 +425,7 @@ int node_neighbour_update()
 				break;
 			}
 		}
-            if(flag == 15)
+            if(flag == 15)           ///////////////// bug..... (fix'ed in next update)
 		if(*((char *) &p->buff+5) == 34 || *((char *) &p->buff+5) == 35 )
                     break;
             sleep (1);	
